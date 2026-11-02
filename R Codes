@@ -1,1 +1,528 @@
 
+
+#install.packages(c("tidyverse", "survival", "survminer"))
+
+library(tidyverse)
+library(survival)
+library(survminer)
+library(psych)
+library(e1071)
+library(readr)
+library(ggplot2)
+library(dplyr)
+library(survRM2)
+library(broom)
+library(ggplot2)
+
+
+# Load dataset
+df <- read.csv("surv_data.csv")
+
+# View structure
+str(df)
+head(df)
+
+# Clean column names
+names(df) <- tolower(gsub(" ", "_", names(df)))
+names(df) <- tolower(trimws(gsub(" ", "_", names(df))))
+
+df$age_at_death <- ifelse(df$age.at.death == "no death occurred",
+                          NA,
+                          df$age.at.death)
+
+df$age.at.death <- as.numeric(df$age.at.death)
+
+df$current.age.of.child <- as.numeric(df$current.age.of.child)
+df$event <- ifelse(df$current.age.of.child == "no", 1, 0)
+df$age.at.death <- ifelse(df$event == 1,
+                  df$age.at.death,
+                  df$current.age.of.child)
+
+df$age.at.death <- ifelse(df$event == 1 & (is.na(df$age.at.death) | df$age.at.death == 0),
+                  df$current.age.of.child,
+                  df$age.at.death)
+
+df <- df %>% filter(!is.na(df$age.at.death))
+
+df$education.level <- as.factor(df$education.level)
+df$weath.index <- as.factor(df$weath.index )
+df$sex.of.child <- as.factor(df$sex.of.child)
+df$type.of.residence <- as.factor(df$type.of.residence)
+df$birth.order <- as.factor(df$birth.order)
+
+summary(df$age.at.death)
+mean(df$age.at.death)
+median(df$age.at.death)
+sd(df$age.at.death)
+
+table(df$event)
+prop.table(table(df$event)) * 100
+
+table(df$sex.of.child)
+table(df$education.level)
+table(df$weath.index)
+table(df$type.of.residence)
+
+
+df$status <- ifelse(df$child.is.alive == "no", 1, 0)
+df$status
+table(df$status)
+df$age.at.death <- as.numeric(df$age.at.death)
+
+df$time <- ifelse(df$status == 1,
+                  df$age.at.death,
+                  df$current.age.of.child)
+
+surv_obj <- Surv(df$time, df$status)
+surv_obj
+#surv_obj <- Surv(df$age.at.death, df$event)
+#surv_obj
+
+km_fit <- survfit(surv_obj ~ 1)
+km_fit
+
+
+ggsurvplot(km_fit,
+           data = df,   
+           conf.int = TRUE,
+           #title = "Overall Survival Curve",
+           xlab = "Time (Months)",
+           ylab = "Survival Probability")
+
+
+
+#OBJECTIVE 1: KAPLAN–MEIER
+
+
+km_fit <- survfit(Surv(df$time, df$event) ~ 1, data = df)
+km_fit 
+
+# Sex
+km_sex <- survfit(surv_obj ~ df$sex.of.child, data = df)
+km_sex
+ggsurvplot(km_sex, pval = TRUE, title = "Survival by Sex")
+
+# Wealth
+km_wealth <- survfit(surv_obj ~ df$weath.index, data = df)
+km_wealth
+ggsurvplot(km_wealth, pval = TRUE, title = "Survival by Wealth")
+
+# Education
+km_edu <- survfit(surv_obj ~ df$education.level, data = df)
+km_edu
+ggsurvplot(km_edu, pval = TRUE, title = "Survival by Education")
+
+# Residence
+km_res <- survfit(surv_obj ~ df$type.of.residence, data = df)
+km_res
+ggsurvplot(km_res, pval = TRUE, title = "Survival by Residence")
+
+
+#OBJECTIVE 2: LOG-RANK TEST
+survdiff(surv_obj ~ df$sex.of.child, data = df)
+survdiff(surv_obj ~ df$weath.index, data = df)
+survdiff(surv_obj ~ df$education.level, data = df)
+survdiff(surv_obj ~ df$type.of.residence, data = df)
+
+#OBJECTIVES 3 & 4: COX MODEL
+cox_model <- coxph(surv_obj ~ 
+                     df$sex.of.child+
+                     df$education.level +
+                     df$weath.index +
+                     df$type.of.residence +
+                     df$birth.order,
+                   data = df)
+
+summary(cox_model)
+
+#HAZARD RATIOS
+exp(coef(cox_model))
+exp(confint(cox_model))
+
+#PH ASSUMPTION
+ph_test <- cox.zph(cox_model)
+ph_test
+plot(ph_test)
+
+
+#FRAILTY MODEL
+frailty_model <- coxph(surv_obj ~ 
+                         df$sex.of.child +
+                         df$education.level +
+                         df$birth.order+
+                         frailty(df$weath.index),
+                       data = df)
+
+summary(frailty_model)
+
+#MODEL COMPARISON
+AIC(cox_model)
+AIC(frailty_model)
+
+#VISUALIZATION
+hist(df$age.at.death,
+     main = "Distribution of Survival Time",
+     xlab = "Months")
+
+
+
+## Descriptive Statistics
+
+df$age_group <- cut(df$age.at.death,
+                    breaks = c(-1, 1, 11, 59, Inf),
+                    labels = c("Neonatal (0-1)",
+                               "Post-neonatal (2-11)",
+                               "Child (12-60)",
+                               "Above 5"),
+                    right = TRUE)
+table(df$education.level, df$age_group)
+prop.table(table(df$education.level, df$age_group), margin = 1)
+
+
+describe(df$mother.s.age)
+describe(df$birth.order)
+describe(df$age.at.death)
+describe(df$status)
+summary(df$status)
+ls(df)
+describe(df$current.age.of.child)
+table(df$mother.s.age, df$birth.order)
+table(df$mother.s.age, df$child.is.alive)
+table(df$mother.s.age, df$age.at.death)
+table(df$mother.s.age, df$time)
+table(df$education.level, df$child.is.alive)
+table(df$education.level, df$age.at.death)
+table(df$weath.index, df$child.is.alive)
+table(df$weath.index, df$age.at.death)
+table(df$sex.of.child, df$child.is.alive)
+table(df$sex.of.child, df$age.at.death)
+
+table(df$education.level)
+prop.table(table(df$education.level))
+
+table(df$weath.index)
+prop.table(table(df$weath.index))
+
+table(df$sex.of.child)
+table(df$type.of.residence)
+
+
+
+df$mother_age_group <- cut(df$mother.s.age,
+                           breaks = c(0, 19, 29, 39, Inf),
+                           labels = c("<20", "20-29", "30-39", "40+"),
+                           right = TRUE)
+
+df$age_group <- cut(df$age.at.death,
+                    breaks = c(-1, 1, 11, 59, Inf),
+                    labels = c("Neonatal (0-1)",
+                               "Post-neonatal (2-11)",
+                               "Child (12-60)",
+                               "Above 5"),
+                    right = TRUE)
+table(df$mother_age_group, df$age_group)
+prop.table(table(df$mother_age_group, df$age_group), margin = 1)
+
+
+ggplot(df, aes(x = age_group, fill = mother_age_group)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Age at Death by Mother's Age Group",
+       x = "Age at Death Group",
+       y = "Count") +
+  theme_minimal()
+
+df$mother_age_group <- cut(df$mother.s.age,
+                           breaks = c(0, 19, 29, 39, Inf),
+                           labels = c("<20", "20-29", "30-39", "40+"),
+                           right = TRUE)
+table(df$mother_age_group, df$child.is.alive)
+prop.table(table(df$mother_age_group, df$child.is.alive), margin = 1)
+
+tab <- table(df$mother_age_group, df$child.is.alive)
+
+mortality_rate <- tab[, "no"] / rowSums(tab)
+
+mortality_rate
+
+
+
+df_plot <- as.data.frame(tab)
+
+ggplot(df_plot, aes(x = Var1, y = Freq, fill = Var2)) +
+  geom_bar(stat = "identity", position = "fill") +
+  labs(title = "Child Survival by Mother's Age Group",
+       x = "Mother's Age Group",
+       y = "Proportion",
+       fill = "Child Status") +
+  theme_minimal()
+coxph(surv_obj ~ mother_age_group, data = df)
+
+
+df$age_group <- cut(df$age.at.death,
+                    breaks = c(-1, 1, 11, 59, Inf),
+                    labels = c("Neonatal (0-1)",
+                               "Post-neonatal (2-11)",
+                               "Child (12-60)",
+                               "Above 5"),
+                    right = TRUE)
+table(df$education.level, df$age_group)
+
+prop.table(table(df$education.level, df$age_group), margin = 1)
+
+table(df$education.level, df$child.is.alive)
+
+prop.table(table(df$education.level, df$child.is.alive), margin = 1)
+
+
+
+ggplot(df, aes(x = age_group, fill = education.level)) +
+  geom_bar(position = "dodge") +
+  labs(title = "Age at Death by Mother's Education",
+       x = "Age Group",
+       y = "Count") +
+  theme_minimal()
+
+coxph(surv_obj ~ education.level, data = df)
+
+df$age_group <- cut(
+  df$age.at.death,
+  breaks = c(-1, 4, 14, 29, 49, 64, Inf),
+  labels = c("0–4", "5–14", "15–29", "30–49", "50–64", "65+")
+)
+
+table(df$weath.index, df$age_group)
+
+#breaks = c(-1, 0, 1, 2, 3, 4, Inf)
+#labels = c("0", "1", "2", "3", "4", "5+")
+
+df$age_group <- cut(
+  df$age.at.death,
+  breaks = c(-1, 4, 14, 29, 49, 64, Inf),
+  labels = c("0–4", "5–14", "15–29", "30–49", "50–64", "65+")
+)
+
+
+ggplot(df, aes(x = age_group, fill = weath.index)) +
+  geom_bar(position = "fill") +
+  labs(
+    title = "Age at Death Distribution by Wealth Index",
+    x = "Age Group",
+    y = "Proportion",
+    fill = "Wealth Index"
+  ) +
+  theme_minimal()
+
+ggplot(df, aes(x = age_group, fill = weath.index)) +
+  geom_bar(position = "dodge") +
+  labs(
+    title = "Age at Death by Wealth Index",
+    x = "Age Group",
+    y = "Count",
+    fill = "Wealth Index"
+  ) +
+  theme_minimal()
+
+
+df %>%
+  count(weath.index, age_group) %>%
+  ggplot(aes(x = age_group, y = weath.index, fill = n)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "white", high = "red") +
+  labs(
+    title = "Heatmap: Wealth Index vs Age at Death",
+    x = "Age Group",
+    y = "Wealth Index",
+    fill = "Count"
+  ) +
+  theme_minimal()
+
+
+mosaicplot(table(df$weath.index, df$age_group),
+           color = TRUE,
+           main = "Wealth Index vs Age at Death")
+
+
+df$age_group <- cut(
+  df$age.at.death,
+  breaks = c(-1, 4, 14, 29, 49, 64, Inf),
+  labels = c("0–4", "5–14", "15–29", "30–49", "50–64", "65+")
+)
+table(df$sex.of.child, df$age_group)
+
+
+df$age_group <- cut(
+  df$age.at.death,
+  breaks = c(-1, 0, 1, 2, 3, 4, Inf),
+  labels = c("0", "1", "2", "3", "4", "5+")
+)
+prop.table(table(df$sex.of.child, df$age_group), margin = 1)
+
+chisq.test(table(df$sex.of.child, df$age_group))
+
+
+
+df$event <- ifelse(df$child.is.alive == "no", 1, 0)
+#Survival vs Key Variables
+table(df$education.level, df$event)
+prop.table(table(df$education.level, df$event), 1)
+
+table(df$weath.index, df$event)
+prop.table(table(df$weath.index, df$event), 1)
+
+table(df$sex.of.child, df$event)
+prop.table(table(df$sex.of.child, df$event), 1)
+
+table(df$type.of.residence, df$event)
+prop.table(table(df$type.of.residence, df$event), 1)
+
+#Age Group vs Key Variables
+table(df$education.level, df$age_group)
+prop.table(table(df$education.level, df$age_group), 1)
+
+table(df$weath.index, df$age_group)
+prop.table(table(df$weath.index, df$age_group), 1)
+
+table(df$sex.of.child, df$age_group)
+prop.table(table(df$sex.of.child, df$age_group), 1)
+
+#Birth Order Effects
+table(df$birth.order, df$event)
+prop.table(table(df$birth.order, df$event), 1)
+
+#Mother's Age vs Survival
+table(df$mother_age_group, df$event)
+prop.table(table(df$mother_age_group, df$event), 1)
+
+
+#CHI-SQUARE TESTS
+chisq.test(table(df$education.level, df$event))
+chisq.test(table(df$weath.index, df$event))
+chisq.test(table(df$sex.of.child, df$event))
+chisq.test(table(df$type.of.residence, df$event))
+
+#Survival vs Wealth
+ggplot(df, aes(x = weath.index, fill = factor(event))) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion", fill = "Event (1=Death)") +
+  theme_minimal()
+
+#Survival vs Education
+ggplot(df, aes(x = education.level, fill = factor(event))) +
+  geom_bar(position = "fill") +
+  theme_minimal()
+
+
+#library(dplyr)
+
+df %>%
+  group_by(sex.of.child) %>%
+  summarise(
+    N = n(),
+    Mean_Age = mean(age.at.death, na.rm = TRUE),
+    SD_Age = sd(age.at.death, na.rm = TRUE),
+    Median_Age = median(age.at.death, na.rm = TRUE),
+    Min_Age = min(age.at.death, na.rm = TRUE),
+    Max_Age = max(age.at.death, na.rm = TRUE)
+  )
+
+summary(df$age.at.death)
+sd(df$age.at.death, na.rm = TRUE)
+summary(df$age.at.death)
+
+
+survdiff(surv_obj ~ weath.index, data = df)
+survdiff(surv_obj ~ education.level, data = df)
+survdiff(surv_obj ~ sex.of.child, data = df)
+survdiff(surv_obj ~ type.of.residence, data = df)
+
+cox_full <- coxph(surv_obj ~ 
+                    education.level + 
+                    mother_age_group + 
+                    sex.of.child + 
+                    birth.order + 
+                    weath.index + 
+                    type.of.residence,
+                  data = df)
+
+summary(cox_full)
+
+cox_interaction <- coxph(surv_obj ~ 
+                           weath.index * type.of.residence +
+                           education.level +
+                           mother_age_group +
+                           sex.of.child +
+                           birth.order,
+                         data = df)
+
+summary(cox_interaction)
+
+
+cox_interaction2 <- coxph(surv_obj ~ 
+                            education.level * mother_age_group +
+                            weath.index +
+                            sex.of.child +
+                            birth.order +
+                            type.of.residence,
+                          data = df)
+
+summary(cox_interaction2)
+
+df$age_segment <- cut(df$age.at.death,
+                      breaks = c(-1, 1, 11, 59),
+                      labels = c("Neonatal", "Post-neonatal", "Child"))
+table(df$age_segment, df$event)
+prop.table(table(df$age_segment, df$event), 1)
+
+cox_age_strata <- coxph(surv_obj ~ 
+                          education.level +
+                          weath.index +
+                          sex.of.child +
+                          birth.order +
+                          strata(age_segment),
+                        data = df)
+
+summary(cox_age_strata)
+
+ph_test <- cox.zph(cox_full)
+ph_test
+plot(ph_test)
+
+cox_stratified <- coxph(surv_obj ~ 
+                          education.level +
+                          sex.of.child +
+                          birth.order +
+                          weath.index +
+                          strata(type.of.residence),
+                        data = df)
+
+summary(cox_stratified)
+
+ggsurvplot(survfit(surv_obj ~ weath.index, data = df),
+           fun = "cloglog",
+           title = "Log-Log Survival Plot (PH Assumption Check)")
+
+
+hr_table <- tidy(cox_full, exponentiate = TRUE, conf.int = TRUE)
+hr_table
+
+ggforest(cox_full, data = df)
+
+df %>%
+  group_by(weath.index) %>%
+  summarise(
+    deaths = sum(event),
+    total = n(),
+    mortality_rate = deaths / total
+  )
+
+ggplot(df, aes(x = weath.index, fill = factor(event))) +
+  geom_bar(position = "fill") +
+  labs(y = "Proportion", fill = "Death (1=Yes)") +
+  theme_minimal()
+
+
+
+rmst2(time = df$age.at.death,
+      status = df$event,
+      arm = df$sex.of.child)
+
